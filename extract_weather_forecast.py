@@ -182,9 +182,9 @@ def main():
     if not args.no_dashboard:
         try:
             import build_dashboard
-            print("\n--- Atualizando Dashboard HTML ---")
-            dataset = build_dashboard.load_and_aggregate_data(output_csv)
-            build_dashboard.generate_html(dataset, "dashboard.html")
+            print("\n--- Atualizando Dashboard HTML com todas as rodadas disponíveis ---")
+            payload = build_dashboard.load_all_runs()
+            build_dashboard.generate_html(payload, "dashboard.html")
         except Exception as e:
             print(f"Aviso: Não foi possível atualizar dashboard.html: {e}", file=sys.stderr)
 

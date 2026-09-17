@@ -159,8 +159,11 @@ O arquivo `dashboard.html` é **100% autossuficiente** e pode ser aberto diretam
   * **Alternador de Modos:**
     * *Média & Incerteza (P10-P90):* Visualização executiva consolidada.
     * *Spaghetti Plot (64 Membros):* Plota simultaneamente todas as 64 trajetórias individuais de cada membro de previsão.
+* **Seletor Dinâmico de Rodada / Data do Ensemble:**
+  * Permite alternar instantaneamente entre a previsão mais recente e rodadas históricas passadas (ex: `17/09/2026 06:00 UTC` vs `07/09/2026 06:00 UTC`).
+  * Atualiza automaticamente todos os KPIs, marcadores do Google Maps e gráficos de meteograma sem recarregar a página.
 * **Cards de KPIs & Filtros:**
-  * Filtro por Unidade Agroindustrial e seleção rápida de talhão.
+  * Seletor de Data da Rodada, Filtro por Unidade Agroindustrial e seleção rápida de talhão.
   * Total de chuva previsto, ranking de polos mais chuvosos e extremos térmicos.
 
 ---

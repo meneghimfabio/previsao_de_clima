@@ -207,6 +207,37 @@ def load_and_aggregate_data(csv_path):
 
     return dataset
 
+def load_all_runs(csv_files=None):
+    import glob
+    if not csv_files:
+        csv_files = sorted(glob.glob("previsao_clima_atvos_*.csv"))
+
+    if not csv_files:
+        print("Erro: Nenhum arquivo previsao_clima_atvos_*.csv encontrado!", file=sys.stderr)
+        sys.exit(1)
+
+    runs = {}
+    for path in csv_files:
+        try:
+            ds = load_and_aggregate_data(path)
+            init_t = ds["init_time"]
+            runs[init_t] = ds
+        except Exception as e:
+            print(f"Aviso: Erro ao carregar {path}: {e}", file=sys.stderr)
+
+    if not runs:
+        print("Erro: Nenhuma rodada válida pôde ser carregada!", file=sys.stderr)
+        sys.exit(1)
+
+    run_list = sorted(list(runs.keys()), reverse=True)
+    latest_run = run_list[0]
+
+    return {
+        "runs": runs,
+        "run_list": run_list,
+        "latest_run": latest_run
+    }
+
 def generate_html(dataset, output_path):
     print("Gerando dashboard.html...")
     data_json = json.dumps(dataset, ensure_ascii=False)
@@ -382,6 +413,15 @@ def generate_html(dataset, output_path):
         <!-- Controls Toolbar -->
         <div class="bg-dark-900/90 border border-slate-800 p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex flex-wrap items-center gap-3">
+                <!-- Seletor de Data / Rodada do Ensemble -->
+                <div class="flex items-center gap-2 bg-dark-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                    <i data-lucide="history" class="w-4 h-4 text-brand-400"></i>
+                    <label class="text-xs font-semibold text-slate-300 uppercase">Data da Rodada:</label>
+                    <select id="run-select" class="bg-dark-900 border border-slate-700 text-white text-xs font-semibold rounded-md px-2.5 py-1 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                        <!-- Populated dynamically -->
+                    </select>
+                </div>
+
                 <div class="flex items-center gap-2">
                     <label class="text-xs font-semibold text-slate-400 uppercase">Unidade:</label>
                     <select id="unit-select" class="bg-dark-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
@@ -526,6 +566,7 @@ def generate_html(dataset, output_path):
         let selectedPointId = null;
         let map = null;
         let mapMarkers = [];
+        let infoWindow = null;
 
         const UNIT_COLORS = {{
             'UAE': '#10b981', // emerald
@@ -538,26 +579,33 @@ def generate_html(dataset, output_path):
             'USL': '#f97316'  // orange
         }};
 
-        function initDashboard() {{
-            lucide.createIcons();
+        let activeRunKey = WX_DATA.latest_run || (WX_DATA.run_list ? WX_DATA.run_list[0] : null);
 
-            // 1. Header Badges & KPIs
-            document.getElementById('header-init-time').textContent = WX_DATA.init_time;
-            document.getElementById('kpi-total-points').textContent = WX_DATA.points.length;
+        function getActiveData() {{
+            if (WX_DATA.runs && WX_DATA.runs[activeRunKey]) {{
+                return WX_DATA.runs[activeRunKey];
+            }}
+            return WX_DATA;
+        }}
+
+        function updateKPIs() {{
+            const curData = getActiveData();
+            document.getElementById('header-init-time').textContent = curData.init_time;
+            document.getElementById('kpi-total-points').textContent = curData.points.length;
 
             let totalRainSum = 0;
             let maxT = -999;
             let minT = 999;
             let maxW = 0;
 
-            WX_DATA.points.forEach(p => {{
+            curData.points.forEach(p => {{
                 totalRainSum += p.rain_total;
                 if (p.temp_max > maxT) maxT = p.temp_max;
                 if (p.temp_min < minT) minT = p.temp_min;
                 if (p.wind_max > maxW) maxW = p.wind_max;
             }});
 
-            const avgRain = (totalRainSum / WX_DATA.points.length).toFixed(1);
+            const avgRain = (totalRainSum / curData.points.length).toFixed(1);
             document.getElementById('kpi-avg-rain').textContent = avgRain;
             document.getElementById('kpi-temp-range').textContent = `${{minT}} ~ ${{maxT}}`;
             document.getElementById('kpi-max-wind').textContent = maxW.toFixed(1);
@@ -566,21 +614,65 @@ def generate_html(dataset, output_path):
             // Unit with max rain
             let maxUnitName = '-';
             let maxUnitRain = 0;
-            for (let u of WX_DATA.units) {{
-                const st = WX_DATA.unit_stats[u];
+            for (let u of curData.units) {{
+                const st = curData.unit_stats[u];
                 if (st && st.avg_rain > maxUnitRain) {{
                     maxUnitRain = st.avg_rain;
                     maxUnitName = u;
                 }}
             }}
             document.getElementById('kpi-max-rain-unit').textContent = `Polo mais chuvoso: ${{maxUnitName}} (${{maxUnitRain}} mm)`;
+        }}
+
+        function switchRun(runKey) {{
+            activeRunKey = runKey;
+            const curData = getActiveData();
+            updateKPIs();
+            renderMarkers();
+            filterMapMarkers();
+            updatePointSelect();
+            updatePointsList();
+
+            if (selectedPointId) {{
+                selectPoint(selectedPointId);
+            }}
+        }}
+
+        function initDashboard() {{
+            lucide.createIcons();
+
+            // 1. Populate Run Select
+            const runSelect = document.getElementById('run-select');
+            runSelect.innerHTML = '';
+            if (WX_DATA.run_list) {{
+                WX_DATA.run_list.forEach(rKey => {{
+                    const opt = document.createElement('option');
+                    opt.value = rKey;
+                    const isLatest = (rKey === WX_DATA.latest_run);
+                    opt.textContent = `${{rKey}} ${{isLatest ? '• Mais Recente' : '• Histórico'}}`;
+                    runSelect.appendChild(opt);
+                }});
+                runSelect.value = activeRunKey;
+                runSelect.addEventListener('change', (e) => {{
+                    switchRun(e.target.value);
+                }});
+            }} else {{
+                const opt = document.createElement('option');
+                opt.value = WX_DATA.init_time;
+                opt.textContent = WX_DATA.init_time;
+                runSelect.appendChild(opt);
+            }}
+
+            const curData = getActiveData();
+            updateKPIs();
 
             // 2. Populate Unit Select
             const unitSelect = document.getElementById('unit-select');
-            WX_DATA.units.forEach(u => {{
+            unitSelect.innerHTML = '<option value="ALL">Todas as Unidades (157)</option>';
+            curData.units.forEach(u => {{
                 const opt = document.createElement('option');
                 opt.value = u;
-                opt.textContent = `Polo ${{u}} (${{WX_DATA.points.filter(p => p.unidade === u).length}} pontos)`;
+                opt.textContent = `Polo ${{u}} (${{curData.points.filter(p => p.unidade === u).length}} pontos)`;
                 unitSelect.appendChild(opt);
             }});
 
@@ -604,8 +696,8 @@ def generate_html(dataset, output_path):
 
             // Initial Point Selection
             updatePointSelect();
-            if (WX_DATA.points.length > 0) {{
-                selectPoint(WX_DATA.points[0].id);
+            if (curData.points.length > 0) {{
+                selectPoint(curData.points[0].id);
             }}
             updatePointsList();
         }}
@@ -634,8 +726,6 @@ def generate_html(dataset, output_path):
             }}
         }}
 
-        let infoWindow = null;
-
         function promptApiKey() {{
             const currentKey = localStorage.getItem('gmaps_api_key') || '';
             const newKey = prompt('Insira sua Chave de API do Google Maps (Google Cloud):', currentKey);
@@ -655,11 +745,10 @@ def generate_html(dataset, output_path):
                 return;
             }}
 
-            // Centro da região Atvos (Mato Grosso do Sul / Goiás / São Paulo)
             map = new google.maps.Map(document.getElementById('map'), {{
                 center: {{ lat: -20.5, lng: -52.5 }},
                 zoom: 6,
-                mapTypeId: google.maps.MapTypeId.HYBRID, // Visão Satélite Híbrida (ótimo para agricultura/talhões)
+                mapTypeId: google.maps.MapTypeId.HYBRID,
                 mapTypeControl: true,
                 mapTypeControlOptions: {{
                     position: google.maps.ControlPosition.TOP_LEFT
@@ -675,10 +764,11 @@ def generate_html(dataset, output_path):
 
         function renderMarkers() {{
             if (!map || !window.google || !window.google.maps) return;
+            mapMarkers.forEach(m => m.setMap(null));
             mapMarkers = [];
-            const selectedUnit = document.getElementById('unit-select').value;
+            const curData = getActiveData();
 
-            WX_DATA.points.forEach(p => {{
+            curData.points.forEach(p => {{
                 const color = UNIT_COLORS[p.unidade] || '#10b981';
                 const marker = new google.maps.Marker({{
                     position: {{ lat: p.lat, lng: p.lon }},
@@ -730,10 +820,11 @@ def generate_html(dataset, output_path):
             const selectedUnit = document.getElementById('unit-select').value;
             const pointSelect = document.getElementById('point-select');
             pointSelect.innerHTML = '';
+            const curData = getActiveData();
 
             const filteredPoints = selectedUnit === 'ALL' 
-                ? WX_DATA.points 
-                : WX_DATA.points.filter(p => p.unidade === selectedUnit);
+                ? curData.points 
+                : curData.points.filter(p => p.unidade === selectedUnit);
 
             filteredPoints.forEach(p => {{
                 const opt = document.createElement('option');
@@ -743,7 +834,8 @@ def generate_html(dataset, output_path):
             }});
 
             if (filteredPoints.length > 0) {{
-                selectPoint(filteredPoints[0].id);
+                const stillExists = filteredPoints.some(p => p.id === selectedPointId);
+                selectPoint(stillExists ? selectedPointId : filteredPoints[0].id);
             }}
         }}
 
@@ -751,10 +843,11 @@ def generate_html(dataset, output_path):
             const selectedUnit = document.getElementById('unit-select').value;
             const listEl = document.getElementById('points-list');
             listEl.innerHTML = '';
+            const curData = getActiveData();
 
             const filteredPoints = selectedUnit === 'ALL' 
-                ? WX_DATA.points 
-                : WX_DATA.points.filter(p => p.unidade === selectedUnit);
+                ? curData.points 
+                : curData.points.filter(p => p.unidade === selectedUnit);
 
             document.getElementById('panel-unit-count').textContent = `${{filteredPoints.length}} pontos`;
 
@@ -783,10 +876,10 @@ def generate_html(dataset, output_path):
 
         function selectPoint(pid) {{
             selectedPointId = pid;
-            const p = WX_DATA.points.find(item => item.id === pid);
+            const curData = getActiveData();
+            const p = curData.points.find(item => item.id === pid);
             if (!p) return;
 
-            // Sync select
             document.getElementById('point-select').value = pid;
 
             // Update Panel
@@ -795,7 +888,7 @@ def generate_html(dataset, output_path):
             document.getElementById('panel-point-coords').textContent = `${{p.lat.toFixed(4)}}, ${{p.lon.toFixed(4)}}`;
             document.getElementById('panel-point-rain').textContent = `${{p.rain_total}} mm`;
             document.getElementById('panel-point-temp').textContent = `${{p.temp_min}}° / ${{p.temp_max}}°`;
-            document.getElementById('charts-subtitle').textContent = `Previsões horárias para ${{p.name}} (Polo ${{p.unidade}} • Lat ${{p.lat.toFixed(4)}}, Lon ${{p.lon.toFixed(4)}})`;
+            document.getElementById('charts-subtitle').textContent = `Previsões (${{curData.init_time}}) para ${{p.name}} (Polo ${{p.unidade}} • Lat ${{p.lat.toFixed(4)}}, Lon ${{p.lon.toFixed(4)}})`;
 
             // Highlight marker on Google Map
             mapMarkers.forEach(m => {{
@@ -803,7 +896,7 @@ def generate_html(dataset, output_path):
                     m.setIcon({{
                         path: google.maps.SymbolPath.CIRCLE,
                         scale: 11,
-                        fillColor: '#fbbf24', // Destaque dourado
+                        fillColor: '#fbbf24',
                         fillOpacity: 1,
                         strokeColor: '#ffffff',
                         strokeWeight: 2.5
@@ -812,12 +905,13 @@ def generate_html(dataset, output_path):
 
                     const content = `
                         <div style="font-family: system-ui, sans-serif; font-size: 12px; color: #0f172a; padding: 4px; min-width: 170px;">
-                            <div style="font-weight: bold; font-size: 14px; color: #0f172a;">${{m.pointData.name}}</div>
-                            <div style="color: #64748b; margin-top: 2px;">Polo: <strong style="color: #0284c7;">${{m.pointData.unidade}}</strong></div>
+                            <div style="font-weight: bold; font-size: 14px; color: #0f172a;">${{p.name}}</div>
+                            <div style="color: #64748b; margin-top: 2px;">Polo: <strong style="color: #0284c7;">${{p.unidade}}</strong></div>
+                            <div style="color: #64748b; font-size: 11px;">Rodada: <strong>${{curData.init_time}}</strong></div>
                             <div style="margin-top: 6px; border-top: 1px solid #e2e8f0; padding-top: 6px; line-height: 1.5;">
-                                🌧️ Chuva (15d): <strong style="color: #0891b2;">${{m.pointData.rain_total}} mm</strong><br>
-                                🌡️ Temp. Máx: <strong>${{m.pointData.temp_max}} °C</strong><br>
-                                💨 Vento Máx: <strong>${{m.pointData.wind_max}} m/s</strong>
+                                🌧️ Chuva (15d): <strong style="color: #0891b2;">${{p.rain_total}} mm</strong><br>
+                                🌡️ Temp. Máx: <strong>${{p.temp_max}} °C</strong><br>
+                                💨 Vento Máx: <strong>${{p.wind_max}} m/s</strong>
                             </div>
                         </div>
                     `;
@@ -845,10 +939,11 @@ def generate_html(dataset, output_path):
         }}
 
         function renderCharts(pid) {{
-            const p = WX_DATA.points.find(item => item.id === pid);
+            const curData = getActiveData();
+            const p = curData.points.find(item => item.id === pid);
             if (!p) return;
 
-            const timeX = WX_DATA.timestamps;
+            const timeX = curData.timestamps;
             const layoutBase = {{
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
@@ -1037,12 +1132,8 @@ def generate_html(dataset, output_path):
     print(f"Sucesso! {output_path} gerado com sucesso ({file_size_mb:.2f} MB).")
 
 def main():
-    if not os.path.exists(INPUT_CSV):
-        print(f"Erro: Arquivo {INPUT_CSV} não encontrado!", file=sys.stderr)
-        sys.exit(1)
-
-    dataset = load_and_aggregate_data(INPUT_CSV)
-    generate_html(dataset, OUTPUT_HTML)
+    payload = load_all_runs()
+    generate_html(payload, OUTPUT_HTML)
 
 if __name__ == "__main__":
     main()
