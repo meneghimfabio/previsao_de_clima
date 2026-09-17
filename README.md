@@ -52,9 +52,12 @@ flowchart TD
 ```text
 ├── README.md                              # Documentação do projeto
 ├── .gitignore                             # Regras de exclusão do Git
-├── extract_weather_forecast.py            # Script principal de extração e processamento
+├── extract_weather_forecast.py            # Script principal de extração do BigQuery e atualização
+├── build_dashboard.py                     # Gerador do dashboard HTML interativo
+├── dashboard.html                         # Dashboard interativo autossuficiente (mapa + gráficos)
 ├── job_XJcmzX1bWl2iKTVPZI4vrmerGPmG.csv   # Arquivo de entrada com as coordenadas
-└── previsao_clima_atvos_latest.csv        # Arquivo de saída gerado (gerado pelo script)
+├── amostra_previsao.csv                   # Amostra das primeiras 100 linhas da previsão
+└── previsao_clima_atvos_latest.csv        # Previsão completa gerada (CSV ~70 MB)
 ```
 
 ---
@@ -113,9 +116,9 @@ O arquivo gerado (`previsao_clima_atvos_latest.csv`) contém a granularidade com
   gcloud config set project demonstracoes-fabio
   ```
 
-### 2. Execução do Script
+### 2. Execução e Atualização do Dashboard
 
-Para rodar a extração da previsão mais recente:
+Para rodar a extração da previsão mais recente e gerar o dashboard:
 
 ```bash
 python3 extract_weather_forecast.py
@@ -123,12 +126,40 @@ python3 extract_weather_forecast.py
 
 O script realizará automaticamente:
 1. Leitura das coordenadas de entrada.
-2. Identificação dinâmica do último `init_time` disponível na tabela `demonstracoes-fabio.weathernext_2.weathernext_2_0_0`.
-3. Execução da consulta particionada e otimizada por cluster espacial via `bq`.
-4. Tratamento e gravação direta no arquivo `previsao_clima_atvos_latest.csv`.
+2. Identificação dinâmica do último `init_time` disponível no BigQuery.
+3. Execução da consulta geoespacial otimizada por cluster.
+4. Gravação do arquivo `previsao_clima_atvos_latest.csv`.
+5. **Geração automática do `dashboard.html`** atualizado com todos os dados.
+
+Caso queira apenas recompilar o dashboard a partir de um CSV já existente:
+```bash
+python3 build_dashboard.py
+```
+
+---
+
+## 🖥️ Dashboard Interativo (`dashboard.html`)
+
+O arquivo `dashboard.html` é **100% autossuficiente** e pode ser aberto diretamente em qualquer navegador (sem necessidade de servidor web ativo):
+
+* **Mapa Geoespacial Interativo (Leaflet):**
+  * Visualização de todos os 157 pontos distribuídos pelas 8 unidades operacionais da Atvos.
+  * Marcadores coloridos por Unidade (UCP, UAE, USL, etc.).
+  * Seleção dinâmica de pontos ao clicar no marcador ou na lista lateral.
+* **Meteograma Probabilístico (Plotly):**
+  * **Chuva Acumulada e Taxa 6h:** Gráfico de linha do acumulado com barras de taxa horária.
+  * **Ciclo Térmico a 2m:** Curvas diurnas de temperatura ao longo de 15 dias.
+  * **Vento a 10m:** Trajetórias de velocidade média e rajadas máximas.
+  * **Alternador de Modos:**
+    * *Média & Incerteza (P10-P90):* Visualização executiva consolidada.
+    * *Spaghetti Plot (64 Membros):* Plota simultaneamente todas as 64 trajetórias individuais de cada membro de previsão.
+* **Cards de KPIs & Filtros:**
+  * Filtro por Unidade Agroindustrial e seleção rápida de talhão.
+  * Total de chuva previsto, ranking de polos mais chuvosos e extremos térmicos.
 
 ---
 
 ## 🔄 Automação e Orquestração
 
-O script foi projetado para fácil integração em rotinas agendadas (ex: cron jobs, Google Cloud Composer / Apache Airflow, ou Cloud Run Jobs) executadas diariamente após a atualização dos modelos meteorológicos.
+O pipeline foi projetado para fácil integração em rotinas agendadas (ex: cron jobs, Google Cloud Composer / Apache Airflow, ou Cloud Run Jobs) executadas diariamente após a atualização dos modelos meteorológicos.
+

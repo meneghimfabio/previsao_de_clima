@@ -166,5 +166,14 @@ def main():
     if os.path.exists(query_file):
         os.remove(query_file)
 
+    # Atualiza automaticamente o dashboard HTML
+    try:
+        import build_dashboard
+        print("\n--- Atualizando Dashboard HTML ---")
+        dataset = build_dashboard.load_and_aggregate_data(OUTPUT_CSV)
+        build_dashboard.generate_html(dataset, "dashboard.html")
+    except Exception as e:
+        print(f"Aviso: Não foi possível atualizar dashboard.html: {e}", file=sys.stderr)
+
 if __name__ == "__main__":
     main()
