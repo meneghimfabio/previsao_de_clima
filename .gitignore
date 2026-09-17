@@ -5,6 +5,7 @@ __pycache__/
 
 # Output data files (large generated files)
 previsao_clima_atvos_*.csv
+!previsao_clima_atvos_20260907_0600.csv
 *.tmp
 temp_query.sql
 
