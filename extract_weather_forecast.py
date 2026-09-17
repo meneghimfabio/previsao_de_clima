@@ -4,6 +4,7 @@ Script de extração de previsão meteorológica (WeatherNext 2) para coordenada
 Gera um arquivo CSV com as previsões detalhadas por membro do ensemble.
 """
 
+import argparse
 import csv
 import json
 import os
@@ -12,7 +13,7 @@ import sys
 import time
 
 INPUT_CSV = "job_XJcmzX1bWl2iKTVPZI4vrmerGPmG.csv"
-OUTPUT_CSV = "previsao_clima_atvos_latest.csv"
+DEFAULT_OUTPUT_CSV = "previsao_clima_atvos_latest.csv"
 PROJECT_ID = "demonstracoes-fabio"
 DATASET_ID = "weathernext_2"
 TABLE_ID = "weathernext_2_0_0"
@@ -112,15 +113,27 @@ def build_query(points, latest_init_time):
     return sql
 
 def main():
+    parser = argparse.ArgumentParser(description="Extração de previsão meteorológica WeatherNext 2")
+    parser.add_argument("--init-time", type=str, default=None, help="Rodada do modelo (ex: '2026-09-07 06:00:00'). Se omitido, busca a mais recente.")
+    parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT_CSV, help="Caminho do CSV de saída")
+    parser.add_argument("--no-dashboard", action="store_true", help="Não atualizar o dashboard.html")
+    args = parser.parse_args()
+
+    output_csv = args.output
+
     print(f"Lendo coordenadas de {INPUT_CSV}...")
     points = load_coordinates(INPUT_CSV)
     print(f"Total de {len(points)} pontos carregados.")
 
-    print("Buscando última rodada (init_time) disponível no BigQuery...")
-    latest_init = get_latest_init_time()
-    print(f"Última rodada detectada: {latest_init}")
+    if args.init_time:
+        init_time = args.init_time
+        print(f"Usando rodada informada manualmente: {init_time}")
+    else:
+        print("Buscando última rodada (init_time) disponível no BigQuery...")
+        init_time = get_latest_init_time()
+        print(f"Última rodada detectada: {init_time}")
 
-    query = build_query(points, latest_init)
+    query = build_query(points, init_time)
     query_file = "temp_query.sql"
     with open(query_file, "w", encoding="utf-8") as f:
         f.write(query)
@@ -157,23 +170,23 @@ def main():
         sys.exit(1)
 
     data_lines = lines[header_idx:]
-    with open(OUTPUT_CSV, "w", encoding="utf-8") as out_f:
+    with open(output_csv, "w", encoding="utf-8") as out_f:
         out_f.write("\n".join(data_lines) + "\n")
 
     total_records = len(data_lines) - 1
-    print(f"Sucesso! {total_records:,} linhas exportadas para '{OUTPUT_CSV}' em {elapsed:.1f}s.")
+    print(f"Sucesso! {total_records:,} linhas exportadas para '{output_csv}' em {elapsed:.1f}s.")
 
     if os.path.exists(query_file):
         os.remove(query_file)
 
-    # Atualiza automaticamente o dashboard HTML
-    try:
-        import build_dashboard
-        print("\n--- Atualizando Dashboard HTML ---")
-        dataset = build_dashboard.load_and_aggregate_data(OUTPUT_CSV)
-        build_dashboard.generate_html(dataset, "dashboard.html")
-    except Exception as e:
-        print(f"Aviso: Não foi possível atualizar dashboard.html: {e}", file=sys.stderr)
+    if not args.no_dashboard:
+        try:
+            import build_dashboard
+            print("\n--- Atualizando Dashboard HTML ---")
+            dataset = build_dashboard.load_and_aggregate_data(output_csv)
+            build_dashboard.generate_html(dataset, "dashboard.html")
+        except Exception as e:
+            print(f"Aviso: Não foi possível atualizar dashboard.html: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

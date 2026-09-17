@@ -121,17 +121,21 @@ O arquivo gerado (`previsao_clima_atvos_latest.csv`) contém a granularidade com
 Para rodar a extração da previsão mais recente e gerar o dashboard:
 
 ```bash
+# Rodar para a previsão mais recente (padrão)
 python3 extract_weather_forecast.py
+
+# Extrair uma rodada histórica específica (ex: 10 dias atrás)
+python3 extract_weather_forecast.py --init-time "2026-09-07 06:00:00" --output "previsao_clima_atvos_20260907_0600.csv" --no-dashboard
 ```
 
 O script realizará automaticamente:
 1. Leitura das coordenadas de entrada.
-2. Identificação dinâmica do último `init_time` disponível no BigQuery.
-3. Execução da consulta geoespacial otimizada por cluster.
-4. Gravação do arquivo `previsao_clima_atvos_latest.csv`.
-5. **Geração automática do `dashboard.html`** atualizado com todos os dados.
+2. Identificação dinâmica do último `init_time` (ou utilização da rodada informada via `--init-time`).
+3. Execução da consulta geoespacial otimizada por cluster e particionamento.
+4. Gravação do arquivo CSV de destino.
+5. **Geração automática do `dashboard.html`** atualizado com todos os dados (a menos que `--no-dashboard` seja informado).
 
-Caso queira apenas recompilar o dashboard a partir de um CSV já existente:
+Caso queira apenas recompilar o dashboard a partir de qualquer CSV de previsão:
 ```bash
 python3 build_dashboard.py
 ```
