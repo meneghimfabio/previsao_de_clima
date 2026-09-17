@@ -142,10 +142,12 @@ python3 build_dashboard.py
 
 O arquivo `dashboard.html` é **100% autossuficiente** e pode ser aberto diretamente em qualquer navegador (sem necessidade de servidor web ativo):
 
-* **Mapa Geoespacial Interativo (Leaflet):**
+* **Mapa Geoespacial Interativo (Google Maps JavaScript API):**
   * Visualização de todos os 157 pontos distribuídos pelas 8 unidades operacionais da Atvos.
-  * Marcadores coloridos por Unidade (UCP, UAE, USL, etc.).
-  * Seleção dinâmica de pontos ao clicar no marcador ou na lista lateral.
+  * **Modo Satélite Híbrido (`HYBRID`):** Permite inspecionar a vegetação, talhões e lavouras reais sob as coordenadas, além de nomes de rodovias e cidades.
+  * Controles nativos do Google Maps (alternador Satélite/Mapa/Relevo, Zoom e Tela Cheia).
+  * Marcadores circulares coloridos por Unidade e popups interativos com dados climáticos resumidos.
+  * Botão **"Chave Maps"** no cabeçalho para configuração e persistência da API Key via navegador (`localStorage`).
 * **Meteograma Probabilístico (Plotly):**
   * **Chuva Acumulada e Taxa 6h:** Gráfico de linha do acumulado com barras de taxa horária.
   * **Ciclo Térmico a 2m:** Curvas diurnas de temperatura ao longo de 15 dias.

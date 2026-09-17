@@ -243,9 +243,25 @@ def generate_html(dataset, output_path):
         }}
     </script>
 
-    <!-- Leaflet CSS & JS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Google Maps JavaScript API -->
+    <script>
+        const GMAPS_KEY = localStorage.getItem('gmaps_api_key') || new URLSearchParams(window.location.search).get('key') || '';
+        window.onGoogleMapsLoaded = function() {{
+            if (window.google && window.google.maps) {{
+                window.gmapsReady = true;
+                if (document.readyState === 'complete' || document.readyState === 'interactive') {{
+                    initDashboard();
+                }} else {{
+                    window.addEventListener('DOMContentLoaded', initDashboard);
+                }}
+            }}
+        }};
+        const gmapsScript = document.createElement('script');
+        gmapsScript.src = `https://maps.googleapis.com/maps/api/js?${{GMAPS_KEY ? 'key=' + GMAPS_KEY + '&' : ''}}libraries=geometry&callback=onGoogleMapsLoaded`;
+        gmapsScript.async = true;
+        gmapsScript.defer = true;
+        document.head.appendChild(gmapsScript);
+    </script>
 
     <!-- Plotly.js CDN -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -311,6 +327,10 @@ def generate_html(dataset, output_path):
                     <i data-lucide="layers" class="w-4 h-4 text-purple-400"></i>
                     <span>Ensemble: <strong class="text-white">64 Membros</strong></span>
                 </div>
+                <button onclick="promptApiKey()" title="Configurar chave do Google Maps (Google Cloud)" class="bg-dark-800/80 hover:bg-dark-700 border border-slate-700/60 rounded-lg px-3 py-1.5 flex items-center gap-2 text-slate-300 hover:text-white transition">
+                    <i data-lucide="key" class="w-4 h-4 text-amber-400"></i>
+                    <span>Chave Maps</span>
+                </button>
             </div>
         </div>
     </header>
@@ -614,75 +634,95 @@ def generate_html(dataset, output_path):
             }}
         }}
 
+        let infoWindow = null;
+
+        function promptApiKey() {{
+            const currentKey = localStorage.getItem('gmaps_api_key') || '';
+            const newKey = prompt('Insira sua Chave de API do Google Maps (Google Cloud):', currentKey);
+            if (newKey !== null) {{
+                if (newKey.trim()) {{
+                    localStorage.setItem('gmaps_api_key', newKey.trim());
+                }} else {{
+                    localStorage.removeItem('gmaps_api_key');
+                }}
+                location.reload();
+            }}
+        }}
+
         function initMap() {{
-            // Centered on Atvos region (Mato Grosso do Sul / Goiás / São Paulo)
-            map = L.map('map', {{
-                zoomControl: true,
-                attributionControl: false
-            }}).setView([-20.5, -52.5], 6);
+            if (!window.google || !window.google.maps) {{
+                console.warn('Google Maps API ainda não carregada.');
+                return;
+            }}
 
-            // Dark Matter Tile Layer (CartoDB)
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-                maxZoom: 18,
-                subdomains: 'abcd',
-            }}).addTo(map);
+            // Centro da região Atvos (Mato Grosso do Sul / Goiás / São Paulo)
+            map = new google.maps.Map(document.getElementById('map'), {{
+                center: {{ lat: -20.5, lng: -52.5 }},
+                zoom: 6,
+                mapTypeId: google.maps.MapTypeId.HYBRID, // Visão Satélite Híbrida (ótimo para agricultura/talhões)
+                mapTypeControl: true,
+                mapTypeControlOptions: {{
+                    position: google.maps.ControlPosition.TOP_LEFT
+                }},
+                streetViewControl: false,
+                fullscreenControl: true,
+                zoomControl: true
+            }});
 
+            infoWindow = new google.maps.InfoWindow();
             renderMarkers();
         }}
 
         function renderMarkers() {{
+            if (!map || !window.google || !window.google.maps) return;
             mapMarkers = [];
             const selectedUnit = document.getElementById('unit-select').value;
 
             WX_DATA.points.forEach(p => {{
                 const color = UNIT_COLORS[p.unidade] || '#10b981';
-                const marker = L.circleMarker([p.lat, p.lon], {{
-                    radius: 6,
-                    fillColor: color,
-                    color: '#ffffff',
-                    weight: 1.5,
-                    opacity: 0.9,
-                    fillOpacity: 0.85
-                }});
-
-                const popupContent = `
-                    <div style="font-family: sans-serif; font-size: 12px; color: #1e293b;">
-                        <div style="font-weight: bold; font-size: 13px;">${{p.name}}</div>
-                        <div style="color: #64748b; margin-bottom: 4px;">Polo: <strong>${{p.unidade}}</strong></div>
-                        <div style="margin-top: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-                            🌧️ Chuva Prevista: <strong>${{p.rain_total}} mm</strong><br>
-                            🌡️ Temp. Máx: <strong>${{p.temp_max}} °C</strong>
-                        </div>
-                    </div>
-                `;
-                marker.bindPopup(popupContent);
-
-                marker.on('click', () => {{
-                    selectPoint(p.id);
+                const marker = new google.maps.Marker({{
+                    position: {{ lat: p.lat, lng: p.lon }},
+                    map: map,
+                    title: `${{p.name}} (${{p.unidade}})`,
+                    icon: {{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 7,
+                        fillColor: color,
+                        fillOpacity: 0.9,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 1.5
+                    }}
                 }});
 
                 marker.pointId = p.id;
                 marker.unidade = p.unidade;
-                marker.addTo(map);
+                marker.pointData = p;
+
+                marker.addListener('click', () => {{
+                    selectPoint(p.id);
+                }});
+
                 mapMarkers.push(marker);
             }});
         }}
 
         function filterMapMarkers() {{
+            if (!map || !window.google || !window.google.maps) return;
             const selectedUnit = document.getElementById('unit-select').value;
-            const visibleBounds = [];
+            const bounds = new google.maps.LatLngBounds();
+            let visibleCount = 0;
 
             mapMarkers.forEach(m => {{
-                if (selectedUnit === 'ALL' || m.unidade === selectedUnit) {{
-                    m.setStyle({{ opacity: 0.9, fillOpacity: 0.85 }});
-                    visibleBounds.push(m.getLatLng());
-                }} else {{
-                    m.setStyle({{ opacity: 0.1, fillOpacity: 0.05 }});
+                const isVisible = (selectedUnit === 'ALL' || m.unidade === selectedUnit);
+                m.setVisible(isVisible);
+                if (isVisible) {{
+                    bounds.extend(m.getPosition());
+                    visibleCount++;
                 }}
             }});
 
-            if (visibleBounds.length > 0) {{
-                map.fitBounds(L.latLngBounds(visibleBounds), {{ padding: [30, 30] }});
+            if (visibleCount > 0 && map) {{
+                map.fitBounds(bounds);
             }}
         }}
 
@@ -757,16 +797,46 @@ def generate_html(dataset, output_path):
             document.getElementById('panel-point-temp').textContent = `${{p.temp_min}}° / ${{p.temp_max}}°`;
             document.getElementById('charts-subtitle').textContent = `Previsões horárias para ${{p.name}} (Polo ${{p.unidade}} • Lat ${{p.lat.toFixed(4)}}, Lon ${{p.lon.toFixed(4)}})`;
 
-            // Highlight marker on map
+            // Highlight marker on Google Map
             mapMarkers.forEach(m => {{
                 if (m.pointId === pid) {{
-                    m.setRadius(10);
-                    m.setStyle({{ color: '#fbbf24', weight: 3, fillOpacity: 1 }});
-                    m.openPopup();
-                    map.panTo([p.lat, p.lon]);
+                    m.setIcon({{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 11,
+                        fillColor: '#fbbf24', // Destaque dourado
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2.5
+                    }});
+                    m.setZIndex(1000);
+
+                    const content = `
+                        <div style="font-family: system-ui, sans-serif; font-size: 12px; color: #0f172a; padding: 4px; min-width: 170px;">
+                            <div style="font-weight: bold; font-size: 14px; color: #0f172a;">${{m.pointData.name}}</div>
+                            <div style="color: #64748b; margin-top: 2px;">Polo: <strong style="color: #0284c7;">${{m.pointData.unidade}}</strong></div>
+                            <div style="margin-top: 6px; border-top: 1px solid #e2e8f0; padding-top: 6px; line-height: 1.5;">
+                                🌧️ Chuva (15d): <strong style="color: #0891b2;">${{m.pointData.rain_total}} mm</strong><br>
+                                🌡️ Temp. Máx: <strong>${{m.pointData.temp_max}} °C</strong><br>
+                                💨 Vento Máx: <strong>${{m.pointData.wind_max}} m/s</strong>
+                            </div>
+                        </div>
+                    `;
+                    if (infoWindow && map) {{
+                        infoWindow.setContent(content);
+                        infoWindow.open(map, m);
+                        map.panTo(m.getPosition());
+                    }}
                 }} else {{
-                    m.setRadius(6);
-                    m.setStyle({{ color: '#ffffff', weight: 1.5, fillOpacity: 0.85 }});
+                    const origColor = UNIT_COLORS[m.unidade] || '#10b981';
+                    m.setIcon({{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 7,
+                        fillColor: origColor,
+                        fillOpacity: 0.9,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 1.5
+                    }});
+                    m.setZIndex(1);
                 }}
             }});
 
