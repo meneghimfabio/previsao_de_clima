@@ -10,6 +10,10 @@ Este projeto realiza a ingestão de coordenadas geográficas (como unidades, pol
 
 A solução processa dados probabilísticos (**64 membros de ensemble**) ao longo de um horizonte de **15 dias (360 horas)** com intervalos de 6 horas, aplicando conversões automáticas para unidades operacionais práticas (°C, mm, m/s).
 
+Adicionalmente, inclui scripts dedicados para extração de séries temporais históricas consolidadas (análise/reanálise operacional) e documentação técnica detalhada sobre a teoria de ensembles e métricas estatísticas aplicadas ao agronegócio.
+
+> 📖 **Consulte o guia completo:** [Guia de Interpretação dos Dados de Previsão de Clima (WeatherNext 2)](GUIA_INTERPRETACAO_DADOS_WEATHERNEXT.md) para compreender detalhadamente a física do ensemble, as colunas dos arquivos e os métodos de cálculo de incerteza (P10/P90) e probabilidade de chuva (PoP).
+
 ---
 
 ## 🏗️ Arquitetura e Otimização Geoespacial
@@ -24,6 +28,7 @@ flowchart TD
     B -->|48 Células Únicas| C[CREATE TEMP TABLE points & distinct_cells]
     C -->|ST_DWITHIN & init_time Pruning| D[CREATE TEMP TABLE weather_extracted]
     D -->|Junção em Memória & Unnest dos Ensembles| E[previsao_clima_atvos_latest.csv]
+    D -->|Agregação Temporal +6h Histórica| F[dados_clima_atvos_historico_20260701_20260917.csv]
 ```
 
 1. **Descoberta Automática de Rodada (`init_time`):** Identifica a rodada de inicialização mais recente do modelo (`MAX(init_time)`).
@@ -50,14 +55,18 @@ flowchart TD
 ## 📁 Estrutura de Arquivos
 
 ```text
-├── README.md                              # Documentação do projeto
-├── .gitignore                             # Regras de exclusão do Git
-├── extract_weather_forecast.py            # Script principal de extração do BigQuery e atualização
-├── build_dashboard.py                     # Gerador do dashboard HTML interativo
-├── dashboard.html                         # Dashboard interativo autossuficiente (mapa + gráficos)
-├── job_XJcmzX1bWl2iKTVPZI4vrmerGPmG.csv   # Arquivo de entrada com as coordenadas
-├── amostra_previsao.csv                   # Amostra das primeiras 100 linhas da previsão
-└── previsao_clima_atvos_latest.csv        # Previsão completa gerada (CSV ~70 MB)
+├── README.md                                         # Documentação principal do projeto
+├── GUIA_INTERPRETACAO_DADOS_WEATHERNEXT.md           # Guia aprofundado sobre Ensemble, colunas e métricas
+├── .gitignore                                        # Regras de exclusão do Git
+├── extract_weather_forecast.py                       # Script de extração de previsão (15 dias futuros)
+├── extract_historical_weather.py                     # Script de extração histórica consolidada
+├── build_dashboard.py                                # Gerador do dashboard HTML interativo
+├── dashboard.html                                    # Dashboard interativo autossuficiente (mapa + gráficos)
+├── job_XJcmzX1bWl2iKTVPZI4vrmerGPmG.csv              # Arquivo de entrada com as coordenadas Atvos
+├── amostra_previsao.csv                              # Amostra das primeiras 100 linhas da previsão
+├── previsao_clima_atvos_latest.csv                   # Previsão completa mais recente (17/09/2026)
+├── previsao_clima_atvos_20260907_0600.csv            # Rodada histórica de previsão (07/09/2026)
+└── dados_clima_atvos_historico_20260701_20260917.csv # Histórico consolidado 01/jul a 17/set/2026
 ```
 
 ---
@@ -80,27 +89,15 @@ O arquivo de entrada (`job_XJcmzX1bWl2iKTVPZI4vrmerGPmG.csv`) contém os metadad
 
 ## 📤 Dados de Saída
 
-O arquivo gerado (`previsao_clima_atvos_latest.csv`) contém a granularidade completa (Ponto × Horário de Previsão × Membro de Ensemble):
+### 1. Previsão Futura (`previsao_clima_atvos_latest.csv`)
+Contém a granularidade completa (Ponto × Horário de Previsão × Membro de Ensemble):
+* **Horizonte:** 15 dias futuros (passos de 6h).
+* **Estrutura:** 64 linhas por timestamp para cada um dos 157 pontos (~602.880 linhas, ~70 MB).
 
-| Coluna | Descrição | Exemplo |
-| :--- | :--- | :--- |
-| `picId` | ID do ponto | `25665` |
-| `clientId` | ID do cliente | `2314` |
-| `name` | Nome do local | `UAE_440010` |
-| `unidade` | Unidade operacional | `UAE` |
-| `quantidade_linhas_unidade` | Contagem de linhas | `13` |
-| `lat` | Latitude do ponto | `-17.66004` |
-| `lon` | Longitude do ponto | `-52.3381` |
-| `init_time` | Data/hora de inicialização do modelo | `2026-09-17 06:00:00` |
-| `forecast_horizon_hours` | Horizonte à frente em horas (6h a 360h) | `6` |
-| `forecast_timestamp` | Timestamp previsto para o evento | `2026-09-17 12:00:00` |
-| `ensemble_member` | Identificador do membro do ensemble (0 a 63) | `0` |
-| `temperature_c` | Temperatura a 2 metros em °C | `23.5` |
-| `precipitation_6hr_mm` | Chuva acumulada em 6 horas em mm | `0.003` |
-| `wind_speed_10m_ms` | Velocidade do vento a 10m em m/s | `1.68` |
-| `sea_level_pressure_pa` | Pressão ao nível do mar em Pa | `102034.4` |
-
-*Tamanho típico de saída para 157 pontos:* ~602.880 linhas (~70 MB).
+### 2. Histórico Consolidado (`dados_clima_atvos_historico_20260701_20260917.csv`)
+Contém a série temporal contínua dos passos operacionais de curto prazo (+6h):
+* **Período:** 01/07/2026 a 17/09/2026 (79 dias contínuos em 315 rodadas).
+* **Estrutura:** 49.455 linhas (~6,4 MB) com médias, mínimos, máximos e rajadas calculadas.
 
 ---
 
@@ -116,25 +113,24 @@ O arquivo gerado (`previsao_clima_atvos_latest.csv`) contém a granularidade com
   gcloud config set project demonstracoes-fabio
   ```
 
-### 2. Execução e Atualização do Dashboard
+### 2. Execução das Extrações
 
-Para rodar a extração da previsão mais recente e gerar o dashboard:
-
+#### A. Extração da Previsão Mais Recente (e atualização do Dashboard)
 ```bash
 # Rodar para a previsão mais recente (padrão)
 python3 extract_weather_forecast.py
 
-# Extrair uma rodada histórica específica (ex: 10 dias atrás)
+# Extrair uma rodada de previsão específica (ex: 10 dias atrás)
 python3 extract_weather_forecast.py --init-time "2026-09-07 06:00:00" --output "previsao_clima_atvos_20260907_0600.csv" --no-dashboard
 ```
 
-O script realizará automaticamente:
-1. Leitura das coordenadas de entrada.
-2. Identificação dinâmica do último `init_time` (ou utilização da rodada informada via `--init-time`).
-3. Execução da consulta geoespacial otimizada por cluster e particionamento.
-4. Gravação do arquivo CSV de destino.
-5. **Geração automática do `dashboard.html`** atualizado com todos os dados (a menos que `--no-dashboard` seja informado).
+#### B. Extração de Histórico Consolidado (Análise / Reanálise)
+```bash
+# Extrair histórico customizado
+python3 extract_historical_weather.py --start "2026-07-01" --end "2026-09-17" --output "meu_historico.csv"
+```
 
+#### C. Compilação Manual do Dashboard
 Caso queira apenas recompilar o dashboard a partir de qualquer CSV de previsão:
 ```bash
 python3 build_dashboard.py
@@ -171,4 +167,3 @@ O arquivo `dashboard.html` é **100% autossuficiente** e pode ser aberto diretam
 ## 🔄 Automação e Orquestração
 
 O pipeline foi projetado para fácil integração em rotinas agendadas (ex: cron jobs, Google Cloud Composer / Apache Airflow, ou Cloud Run Jobs) executadas diariamente após a atualização dos modelos meteorológicos.
-
